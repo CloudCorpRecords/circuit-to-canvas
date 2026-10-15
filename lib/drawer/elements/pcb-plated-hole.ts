@@ -7,6 +7,7 @@ import { drawPolygon } from "../shapes/polygon"
 import { drawRect } from "../shapes/rect"
 import type { CanvasContext, PcbColorMap } from "../types"
 import { offsetPolygonPoints } from "./soldermask-margin"
+import { isPlatedHolePadCollapsed } from "./helper-functions/is-plated-hole-pad-collapsed"
 
 export interface DrawPcbPlatedHoleParams {
   ctx: CanvasContext
@@ -28,27 +29,29 @@ export function drawPcbPlatedHole(params: DrawPcbPlatedHoleParams): void {
     drawSoldermask,
   } = params
 
-  // Skip holes that are fully covered with soldermask when soldermask is enabled,
-  // as they should have been handled by soldermask processing.
-  // When soldermask is disabled, fully covered holes should be drawn as normal copper.
-  if (hole.is_covered_with_solder_mask === true && drawSoldermask) {
-    return
-  }
-
   const copperColor = colorMap.copper[params.layer ?? "top"]
 
   // For negative margins, draw smaller copper (inset by margin amount)
-  const copperInset = soldermaskMargin < 0 ? Math.abs(soldermaskMargin) : 0
+  const copperInset =
+    drawSoldermask &&
+    hole.is_covered_with_solder_mask === true &&
+    soldermaskMargin < 0
+      ? Math.abs(soldermaskMargin)
+      : 0
+  // Skip collapsed copper shapes while still cutting and painting the drill.
+  const hasCopperArea = !isPlatedHolePadCollapsed(hole, -copperInset)
 
   if (hole.shape === "circle") {
     // Draw outer copper ring (smaller if negative margin)
-    drawCircle({
-      ctx,
-      center: { x: hole.x, y: hole.y },
-      radius: hole.outer_diameter / 2 - copperInset,
-      fill: copperColor,
-      realToCanvasMat,
-    })
+    if (hasCopperArea) {
+      drawCircle({
+        ctx,
+        center: { x: hole.x, y: hole.y },
+        radius: hole.outer_diameter / 2 - copperInset,
+        fill: copperColor,
+        realToCanvasMat,
+      })
+    }
 
     // Cut inner drill hole out of copper, then paint drill color.
     cutCurrentLayer(ctx, () => {
@@ -73,15 +76,17 @@ export function drawPcbPlatedHole(params: DrawPcbPlatedHoleParams): void {
 
   if (hole.shape === "oval") {
     // Draw outer copper oval (smaller if negative margin)
-    drawOval({
-      ctx,
-      center: { x: hole.x, y: hole.y },
-      radius_x: hole.outer_width / 2 - copperInset,
-      radius_y: hole.outer_height / 2 - copperInset,
-      fill: copperColor,
-      realToCanvasMat,
-      rotation: hole.ccw_rotation,
-    })
+    if (hasCopperArea) {
+      drawOval({
+        ctx,
+        center: { x: hole.x, y: hole.y },
+        radius_x: hole.outer_width / 2 - copperInset,
+        radius_y: hole.outer_height / 2 - copperInset,
+        fill: copperColor,
+        realToCanvasMat,
+        rotation: hole.ccw_rotation,
+      })
+    }
 
     // Cut inner drill hole out of copper, then paint drill color.
     cutCurrentLayer(ctx, () => {
@@ -110,15 +115,17 @@ export function drawPcbPlatedHole(params: DrawPcbPlatedHoleParams): void {
 
   if (hole.shape === "pill") {
     // Draw outer copper pill (smaller if negative margin)
-    drawPill({
-      ctx,
-      center: { x: hole.x, y: hole.y },
-      width: hole.outer_width - copperInset * 2,
-      height: hole.outer_height - copperInset * 2,
-      fill: copperColor,
-      realToCanvasMat,
-      rotation: hole.ccw_rotation,
-    })
+    if (hasCopperArea) {
+      drawPill({
+        ctx,
+        center: { x: hole.x, y: hole.y },
+        width: hole.outer_width - copperInset * 2,
+        height: hole.outer_height - copperInset * 2,
+        fill: copperColor,
+        realToCanvasMat,
+        rotation: hole.ccw_rotation,
+      })
+    }
 
     // Cut inner drill hole out of copper, then paint drill color.
     cutCurrentLayer(ctx, () => {
@@ -147,18 +154,20 @@ export function drawPcbPlatedHole(params: DrawPcbPlatedHoleParams): void {
 
   if (hole.shape === "circular_hole_with_rect_pad") {
     // Draw rectangular pad (smaller if negative margin)
-    drawRect({
-      ctx,
-      center: { x: hole.x, y: hole.y },
-      width: hole.rect_pad_width - copperInset * 2,
-      height: hole.rect_pad_height - copperInset * 2,
-      fill: copperColor,
-      realToCanvasMat,
-      borderRadius: hole.rect_border_radius
-        ? Math.max(0, hole.rect_border_radius - copperInset)
-        : 0,
-      ccwRotationDegrees: hole.rect_ccw_rotation,
-    })
+    if (hasCopperArea) {
+      drawRect({
+        ctx,
+        center: { x: hole.x, y: hole.y },
+        width: hole.rect_pad_width - copperInset * 2,
+        height: hole.rect_pad_height - copperInset * 2,
+        fill: copperColor,
+        realToCanvasMat,
+        borderRadius: hole.rect_border_radius
+          ? Math.max(0, hole.rect_border_radius - copperInset)
+          : 0,
+        ccwRotationDegrees: hole.rect_ccw_rotation,
+      })
+    }
 
     // Draw circular drill hole (with offset)
     const holeX = hole.x + (hole.hole_offset_x ?? 0)
@@ -185,17 +194,19 @@ export function drawPcbPlatedHole(params: DrawPcbPlatedHoleParams): void {
 
   if (hole.shape === "pill_hole_with_rect_pad") {
     // Draw rectangular pad (smaller if negative margin)
-    drawRect({
-      ctx,
-      center: { x: hole.x, y: hole.y },
-      width: hole.rect_pad_width - copperInset * 2,
-      height: hole.rect_pad_height - copperInset * 2,
-      fill: copperColor,
-      realToCanvasMat,
-      borderRadius: hole.rect_border_radius
-        ? Math.max(0, hole.rect_border_radius - copperInset)
-        : 0,
-    })
+    if (hasCopperArea) {
+      drawRect({
+        ctx,
+        center: { x: hole.x, y: hole.y },
+        width: hole.rect_pad_width - copperInset * 2,
+        height: hole.rect_pad_height - copperInset * 2,
+        fill: copperColor,
+        realToCanvasMat,
+        borderRadius: hole.rect_border_radius
+          ? Math.max(0, hole.rect_border_radius - copperInset)
+          : 0,
+      })
+    }
 
     // Draw pill drill hole (with offset)
     const holeX = hole.x + (hole.hole_offset_x ?? 0)
@@ -224,18 +235,20 @@ export function drawPcbPlatedHole(params: DrawPcbPlatedHoleParams): void {
 
   if (hole.shape === "rotated_pill_hole_with_rect_pad") {
     // Draw rotated rectangular pad (smaller if negative margin)
-    drawRect({
-      ctx,
-      center: { x: hole.x, y: hole.y },
-      width: hole.rect_pad_width - copperInset * 2,
-      height: hole.rect_pad_height - copperInset * 2,
-      fill: copperColor,
-      realToCanvasMat,
-      borderRadius: hole.rect_border_radius
-        ? Math.max(0, hole.rect_border_radius - copperInset)
-        : 0,
-      ccwRotationDegrees: hole.rect_ccw_rotation,
-    })
+    if (hasCopperArea) {
+      drawRect({
+        ctx,
+        center: { x: hole.x, y: hole.y },
+        width: hole.rect_pad_width - copperInset * 2,
+        height: hole.rect_pad_height - copperInset * 2,
+        fill: copperColor,
+        realToCanvasMat,
+        borderRadius: hole.rect_border_radius
+          ? Math.max(0, hole.rect_border_radius - copperInset)
+          : 0,
+        ccwRotationDegrees: hole.rect_ccw_rotation,
+      })
+    }
 
     // Draw rotated pill drill hole (with offset)
     const holeX = hole.x + (hole.hole_offset_x ?? 0)

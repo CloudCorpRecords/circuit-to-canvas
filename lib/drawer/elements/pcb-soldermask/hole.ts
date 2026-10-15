@@ -12,19 +12,35 @@ export function processHoleSoldermask(params: {
   hole: PcbHole
   realToCanvasMat: Matrix
   soldermaskOverCopperColor: string
+  substrateColor: string
+  phase: "substrate" | "openings"
 }): void {
-  const { ctx, hole, realToCanvasMat, soldermaskOverCopperColor } = params
+  const {
+    ctx,
+    hole,
+    realToCanvasMat,
+    soldermaskOverCopperColor,
+    substrateColor,
+    phase,
+  } = params
 
   const isCoveredWithSoldermask = hole.is_covered_with_solder_mask === true
-  const margin = hole.soldermask_margin ?? 0
+  // Like circuit-to-svg, holes only use margins when coverage is explicit.
+  // A zero margin leaves the hole exposed, even when the flag is true.
+  const margin = isCoveredWithSoldermask ? (hole.soldermask_margin ?? 0) : 0
 
-  if (isCoveredWithSoldermask) {
-    // Draw light green over the entire hole
-    ctx.fillStyle = soldermaskOverCopperColor
-    drawHoleShapePath({ ctx, hole, realToCanvasMat, margin: 0 })
-    ctx.fill()
-  } else if (margin < 0) {
-    // Negative margin: cut a smaller opening, then draw light green ring.
+  if (phase === "substrate") {
+    if (margin > 0) {
+      // Preserve substrate borders even when board material is hidden.
+      ctx.fillStyle = substrateColor
+      drawHoleShapePath({ ctx, hole, realToCanvasMat, margin })
+      ctx.fill()
+    }
+    return
+  }
+
+  if (margin < 0) {
+    // Negative margin: cut a smaller opening, then draw a mask ring.
     drawHoleShapePath({ ctx, hole, realToCanvasMat, margin })
     cutPathFromSoldermask(ctx)
     drawNegativeMarginRingForHole({
@@ -34,12 +50,8 @@ export function processHoleSoldermask(params: {
       soldermaskOverCopperColor,
       margin,
     })
-  } else if (margin > 0) {
-    // Positive margin: cut larger opening from soldermask.
-    drawHoleShapePath({ ctx, hole, realToCanvasMat, margin })
-    cutPathFromSoldermask(ctx)
   } else {
-    // Zero margin: cut hole opening from soldermask.
+    // Zero/positive margins expose the hole after all substrate borders are drawn.
     drawHoleShapePath({ ctx, hole, realToCanvasMat, margin: 0 })
     cutPathFromSoldermask(ctx)
   }
@@ -60,6 +72,15 @@ function drawHoleShapePath(params: {
 }): void {
   const { ctx, hole, realToCanvasMat, margin } = params
   const rotation = getHoleRotation(hole)
+
+  // Leave an empty path when the inset closes the opening, so callers cannot
+  // accidentally fill or cut the preceding element's path.
+  ctx.beginPath()
+  const minDimension =
+    "hole_diameter" in hole
+      ? hole.hole_diameter
+      : Math.min(hole.hole_width, hole.hole_height)
+  if (minDimension + margin * 2 <= 0) return
 
   if (hole.hole_shape === "circle") {
     const [cx, cy] = applyToPoint(realToCanvasMat, [hole.x, hole.y])
